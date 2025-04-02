@@ -13,6 +13,7 @@ impl MigrationTrait for Migration {
                 .table(Reservation::Table)
                 .if_not_exists()
                 .col(pk_auto(Reservation::Id))
+                .col(string(Reservation::ReservationId))
                 .col(ColumnDef::new_with_type(Reservation::Timespan, TstzRange::column_type()))
                 .to_owned()
         )
@@ -30,5 +31,6 @@ impl MigrationTrait for Migration {
 enum Reservation {
     Table,
     Id,
+    ReservationId,
     Timespan,
 }

@@ -4100,6 +4100,7 @@ dependencies = [
 name = "sea_orm_tstzrange"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "sea-orm",
  "serde",

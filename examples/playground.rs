@@ -1,15 +1,20 @@
 use std::ops::Bound;
 
 
+use chrono::Days;
 #[allow(unused_imports)]
 use loco_rs::{cli::playground, prelude::*};
 
 
+use migration::Query;
 use sea_orm::FromQueryResult;
 use sea_orm::QuerySelect;
 
+use sea_orm::StatementBuilder;
 use sea_orm::Value;
 use sea_orm_tstzrange::TstzRange;
+use serde::Deserialize;
+use serde::Serialize;
 use temp_range::{app::App, models::_entities::reservation};
 
 use sea_orm::sea_query::Alias;
@@ -24,7 +29,6 @@ pub struct RangeModel {
     pub timespan: Option<TstzRange>,
 }
 
-// Helper method to create a query expression
 pub fn create_range_expr(start: DateTime<Utc>, end: DateTime<Utc>) -> SimpleExpr {
     let range = TstzRange::from_datetime_pair(start, end);
     SimpleExpr::Value(Value::from(range))
@@ -33,7 +37,7 @@ pub fn create_range_expr(start: DateTime<Utc>, end: DateTime<Utc>) -> SimpleExpr
 #[tokio::main]
 async fn main() -> loco_rs::Result<()> {
     let _ctx = playground::<App>().await?;
-
+    let builder = _ctx.db.get_database_backend();
     let start = Utc::now();
     let end = start + chrono::Duration::days(1);
 
@@ -85,6 +89,14 @@ async fn main() -> loco_rs::Result<()> {
     // active_model.insert(&_ctx.db).await.unwrap();
     // let res = articles::Entity::find().all(&ctx.db).await.unwrap();
 
+    let one: Option<RangeModel> = reservation::Entity::find()
+        .expr(Expr::col(reservation::Column::Timespan).cast_as(Alias::new("TEXT")))
+        .into_model()
+        .one(&_ctx.db).await.unwrap();
+    println!("{:#?}", one);
+
+
+
     let res = reservation::Entity::find()
         .expr(Expr::col(reservation::Column::Timespan).cast_as(Alias::new("TEXT")))
         .all(&_ctx.db).await.unwrap();
@@ -92,14 +104,37 @@ async fn main() -> loco_rs::Result<()> {
 
     for r in res {
         let am = r.into_active_model();
-        let x = am.timespan.as_ref().clone().map(|x| {
-            println!("{}", x);
+        let range = am.timespan.as_ref().clone().map(|x| {
+            println!("timespan str: {}", x);
             TstzRange::from_string(&x).unwrap()
-        });
+        }).unwrap();
 
-        println!("{:#?}", &x);
+        let updated_end = range.end().and_then(|dt| dt.checked_add_days(Days::new(1))).unwrap();
+        let new = TstzRange::from_datetime_pair(range.start().unwrap(), updated_end);
+        println!("original: {:#?}, new: {:#?}", &range, &new);
+        let v = Value::from(new.clone());
+        let range_expr = Expr::cust_with_expr("$1::TSTZRANGE", SimpleExpr::Value(v));
+
+        let update = Query::update()
+        .table(reservation::Entity)
+        .value(reservation::Column::Timespan, range_expr)
+        .and_where(Expr::col(reservation::Column::Id).eq(am.id.into_value().unwrap()))
+        .to_owned();
+
+
+        let stmt = builder.build(&update);
+        let result = _ctx.db.execute(stmt).await?;
+        println!("Updated result: {:?}", result);
+
+    // .columns([reservation::Column::Timespan])
+    // .values_panic([Expr::cust_with_expr("$1::TSTZRANGE", SimpleExpr::Value(range_string.into()))])
 
     }
+    let res2: Vec<RangeModel> = reservation::Entity::find()
+        .expr(Expr::col(reservation::Column::Timespan).cast_as(Alias::new("TEXT")))
+        .into_model()
+        .all(&_ctx.db).await.unwrap();
+    println!("{:#?}", res2);
 
 
 
